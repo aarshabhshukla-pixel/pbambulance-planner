@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambulance Fleet Planner</title>
+<link rel="stylesheet" href="leaflet.css">
+<meta name="description" content="Plan ambulance base locations around hospitals: coverage, response time and turnaround.">
+<meta name="theme-color" content="#e11d48">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fleet Planner">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{
+  --bg:#eef1f6; --panel:#ffffff; --panel2:#f5f7fb; --text:#0f172a; --muted:#5b6475; --line:#dde3ec;
+  --brand:#e11d48; --ok:#15803d; --okbg:#dcfce7; --bad:#dc2626; --badbg:#fee2e2; --warn:#b45309; --warnbg:#fef3c7;
+  --info:#1d4ed8; --shadow:0 1px 2px rgba(15,23,42,.06),0 6px 20px rgba(15,23,42,.08);
+}
+:root[data-theme="dark"]{
+  --bg:#080c14; --panel:#101725; --panel2:#151e30; --text:#e7ebf3; --muted:#93a0b8; --line:#23304a;
+  --ok:#4ade80; --okbg:rgba(34,197,94,.14); --bad:#fb7185; --badbg:rgba(244,63,94,.16); --warn:#fbbf24; --warnbg:rgba(251,191,36,.14);
+  --info:#93c5fd; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;font-variant-numeric:tabular-nums}
+.app{display:grid;grid-template-columns:430px 1fr;height:100vh}
+.side{order:1;overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:14px 16px 32px}
+.mapwrap{order:2;position:relative;min-height:0}
+#map{position:absolute;inset:0;background:var(--bg)}
+@media (max-width:900px){
+  .app{grid-template-columns:1fr;height:auto}
+  .mapwrap{order:1;height:64vh}
+  .side{order:2;border-right:0;border-top:1px solid var(--line);overflow:visible}
+}
+button,input,select,textarea{font:inherit;color:inherit}
+
+/* header */
+.hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.logo{width:36px;height:36px;border-radius:10px;background:var(--brand);color:#fff;display:grid;place-items:center;font:800 24px/1 system-ui;flex:none}
+.scname{width:100%;font:700 16px system-ui;border:1px solid transparent;background:transparent;border-radius:6px;padding:2px 4px;margin-left:-4px}
+.scname:hover,.scname:focus{border-color:var(--line);background:var(--panel2);outline:none}
+.brand p{margin:0;color:var(--muted);font-size:12px}
+.hdr-btns{display:flex;gap:6px;flex:none}
+
+section{margin-top:16px}
+.sec-h{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.hint{font-weight:500;letter-spacing:0;text-transform:none;font-size:11px;color:var(--muted)}
+details.sec{border-top:1px solid var(--line);padding-top:12px;margin-top:14px}
+details.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary::after{content:"▸";margin-left:auto;font-size:13px;transition:transform .15s}
+details.sec[open]>summary::after{transform:rotate(90deg)}
+details.sec .body{margin-top:10px}
+.count{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:20px;padding:0 7px;font-size:11px;letter-spacing:0}
+
+/* alerts */
+.alerts{display:grid;gap:6px}
+.alert{padding:7px 10px;border-radius:8px;font-size:13px}
+.alert.ok{background:var(--okbg);color:var(--ok)}
+.alert.bad{background:var(--badbg);color:var(--bad);font-weight:600}
+.alert.warn{background:var(--warnbg);color:var(--warn);font-weight:600}
+
+/* kpis */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.kl{font-size:12px;color:var(--muted);font-weight:600}
+.kv{display:flex;align-items:baseline;gap:4px;margin-top:1px}
+.kv .v{font-size:23px;font-weight:750;letter-spacing:-.02em}
+.kv .u{font-size:12px;color:var(--muted);font-weight:600}
+.kd{font-size:12px;font-weight:700;min-height:16px}
+.ks{font-size:11px;color:var(--muted);margin-top:2px}
+.dg{color:var(--ok)} .db{color:var(--bad)} .d0{color:var(--muted);font-weight:500}
+
+/* impact */
+.impact{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--info);border-radius:8px;padding:9px 12px}
+.impact p{margin:0}
+.impact .lead{font-weight:600}
+.impact .sub{margin-top:6px;font-size:12px;color:var(--muted)}
+.log{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:2px;max-height:130px;overflow:auto}
+.log li{font-size:12px;color:var(--muted);padding:3px 0;border-bottom:1px dashed var(--line)}
+.log time{font-weight:700;color:var(--text);margin-right:6px}
+
+/* controls */
+.ctl{margin-bottom:12px}
+.ctl>label{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:600;margin-bottom:4px}
+.row{display:flex;align-items:center;gap:8px}
+.row input[type=range]{flex:1;accent-color:var(--brand);min-width:0}
+.unit-l{font-size:12px;color:var(--muted);min-width:30px}
+input[type=number],input[type=text],select,textarea,.coord{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+input[type=number]{width:72px}
+select{width:100%}
+textarea{width:100%;resize:vertical;font:12px ui-monospace,Menlo,Consolas,monospace;margin-top:6px}
+.check,.mini{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;cursor:pointer}
+.check{font-size:13px;margin-bottom:8px}
+.check input,.mini input{accent-color:var(--brand);width:15px;height:15px;margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-bottom:12px}
+.grid2 label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600}
+.grid2 span{display:flex;align-items:center;gap:5px;font-weight:500;color:var(--muted)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btns3{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:8px 10px;font:600 13px system-ui,sans-serif;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.primary:disabled{opacity:.6;cursor:wait}
+.btn.sm{padding:5px 9px;font-size:12px}
+.btn.full{width:100%}
+.btn.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.note{font-size:12px;color:var(--muted);margin:4px 0 8px}
+select.inline{width:auto;padding:4px 6px;font-size:12px}
+
+/* entity rows */
+.ent{border:1px solid var(--line);border-left:4px solid var(--c);border-radius:10px;padding:7px 10px 9px;margin-bottom:8px;background:var(--panel2)}
+.ent.off{opacity:.6}
+.ent-h{display:flex;align-items:center;gap:4px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
+.name{flex:1;min-width:0;font:700 14px system-ui;background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 5px}
+.name:hover,.name:focus{border-color:var(--line);background:var(--panel);outline:none}
+.ico{background:none;border:1px solid transparent;border-radius:6px;color:var(--muted);cursor:pointer;padding:3px 6px;font:600 12px system-ui;flex:none}
+.ico:hover{border-color:var(--line);color:var(--text)}
+.ico.del:hover{color:var(--bad)}
+.ico:disabled{opacity:.35;cursor:not-allowed}
+.chip{font-size:11px;font-weight:700;padding:1px 8px;border-radius:20px;white-space:nowrap;flex:none}
+.chip.ok{background:var(--okbg);color:var(--ok)}
+.chip.bad{background:var(--badbg);color:var(--bad)}
+.chip.off{background:var(--line);color:var(--muted)}
+.ent-g{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:4px 10px;margin-top:5px}
+.lbl{display:block;font-size:11px;color:var(--muted)}
+.val{font-weight:700;font-size:13px}
+.val.bad{color:var(--bad)}
+.ent-f{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:6px}
+.ent-f input[type=number]{width:62px;padding:3px 6px}
+.coord{width:100%;margin-top:6px;font:12px ui-monospace,Menlo,Consolas,monospace;padding:4px 7px}
+
+/* coverage */
+.bar{display:grid;grid-template-columns:76px 1fr 42px;align-items:center;gap:8px;margin-bottom:6px;font-size:12px}
+.bt{height:8px;border-radius:6px;background:var(--line);overflow:hidden}
+.bt span{display:block;height:100%;background:var(--brand);border-radius:6px}
+.bv{text-align:right;font-weight:700}
+.overlap{font-size:12px;color:var(--muted);margin-top:4px}
+#notes{margin:0;padding-left:18px;color:var(--muted);font-size:12px}
+#notes li{margin-bottom:4px}
+table.fs{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+table.fs th{text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding:4px}
+table.fs td{padding:4px;border-bottom:1px dashed var(--line)}
+table.fs tr.hit td{background:var(--okbg);font-weight:700}
+
+/* map overlays */
+.leaflet-container{font:inherit;background:var(--bg)}
+.leaflet-container.adding{cursor:crosshair}
+:root[data-theme="dark"] .leaflet-bar a,:root[data-theme="dark"] .leaflet-control-attribution{background:var(--panel);color:var(--text);border-color:var(--line)}
+:root[data-theme="dark"] .leaflet-control-attribution a{color:var(--info)}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--text)}
+.pop b{display:block;margin-bottom:2px}
+.pop .mono{font:12px ui-monospace,Menlo,monospace;color:var(--muted)}
+.pop-btns{display:grid;gap:5px;margin-top:8px}
+.pop-btns button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:7px;padding:6px 8px;font:600 12px system-ui;cursor:pointer;text-align:left}
+.pop-btns button:hover{border-color:var(--brand)}
+.tools{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.tools button{border:0;border-bottom:1px solid var(--line);background:var(--panel);color:var(--text);padding:7px 10px;font:600 12px system-ui;cursor:pointer;text-align:left;white-space:nowrap}
+.tools button:last-child{border-bottom:0}
+.tools button:hover{background:var(--panel2)}
+.tools button.on{background:var(--brand);color:#fff}
+.search{position:absolute;top:10px;left:58px;z-index:1000;width:min(400px,calc(100% - 70px))}
+.search input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:var(--shadow);font:14px system-ui}
+.results{margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;display:none;max-height:320px;overflow-y:auto}
+.results.show{display:block}
+.results button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;color:var(--text);padding:8px 12px;cursor:pointer;font:600 13px system-ui}
+.results button:hover{background:var(--panel2)}
+.results button small{display:block;color:var(--muted);font-weight:400;font-size:11px}
+.results .msg{padding:9px 12px;font-size:12px;color:var(--muted)}
+.mode-hint{position:absolute;top:62px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--brand);color:#fff;padding:6px 14px;border-radius:20px;font:600 12px system-ui;display:none;box-shadow:var(--shadow);white-space:nowrap}
+.legend{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;box-shadow:var(--shadow);font-size:12px;max-width:230px}
+.legend summary{font-weight:700;cursor:pointer}
+.lg{display:flex;align-items:center;gap:8px;margin-top:4px}
+.sw{width:18px;height:10px;border-radius:3px;flex:none}
+.toast{position:absolute;left:12px;bottom:26px;z-index:1000;max-width:min(560px,calc(100% - 24px));background:var(--panel);color:var(--text);border:1px solid var(--line);border-left:4px solid var(--info);border-radius:10px;padding:9px 12px;box-shadow:var(--shadow);font-size:13px;font-weight:600;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;pointer-events:none}
+.toast.show{opacity:1;transform:none}
+
+/* markers (0-size wrapper, centred content) */
+.mk{background:none;border:0}
+.amb,.hosp,.hot{position:absolute;left:0;top:0;transform:translate(-50%,-50%)}
+.amb{min-width:34px;height:34px;padding:0 8px;border-radius:17px;background:var(--c);color:#fff;font:800 12px/30px system-ui;text-align:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:grab;white-space:nowrap}
+.amb.off{background:#94a3b8}
+.amb.pin{outline:2px dashed #0f172a;outline-offset:2px}
+.amb::before{content:"";position:absolute;inset:-7px;border-radius:24px;border:3px solid transparent;pointer-events:none}
+.amb.out::before{border-color:#ef4444;animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.tag{position:absolute;left:0;top:22px;transform:translateX(-50%);white-space:nowrap;background:rgba(15,23,42,.88);color:#fff;font:700 11px system-ui;padding:2px 6px;border-radius:6px;pointer-events:none}
+.tag.out{background:#dc2626}
+.hosp{width:32px;height:32px;border-radius:9px;background:#e11d48;border:2px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.4);display:grid;place-items:center;color:#fff;font:800 22px/1 system-ui;cursor:grab}
+.htag{top:20px;background:#e11d48}
+.hot{width:26px;height:26px;border-radius:50%;background:#f97316;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);color:#fff;font:800 11px/22px system-ui;text-align:center;cursor:grab}
+.rl{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;font:700 11px system-ui;padding:1px 7px;border-radius:10px;background:var(--panel);color:var(--c);border:1px solid var(--c);pointer-events:none}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <header class="hdr">
+      <div class="brand">
+        <div class="logo">+</div>
+        <div style="min-width:0;flex:1"><input id="scName" class="scname" aria-label="Scenario name"><p>Ambulance deployment planner</p></div>
+      </div>
+      <div class="hdr-btns">
+        <button id="undoBtn" class="btn sm" title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button id="redoBtn" class="btn sm" title="Redo (Ctrl+Y)">↷</button>
+        <button id="themeBtn" class="btn sm">Dark</button>
+      </div>
+    </header>
+
+    <div id="alerts" class="alerts"></div>
+
+    <section>
+      <div class="sec-h">Live KPIs <span class="hint">Δ = effect of last change</span></div>
+      <div id="kpis" class="kpis"></div>
+    </section>
+
+    <section>
+      <div class="sec-h">Impact of last change</div>
+      <div id="impact" class="impact"><p class="lead">Drag, add or remove anything on the map to see its impact.</p></div>
+      <ol id="log" class="log"></ol>
+    </section>
+
+    <details class="sec" open>
+      <summary>Ambulances <span class="count" id="uCount"></span></summary>
+      <div class="body">
+        <div class="btns3">
+          <button class="btn sm" id="uAddMap">+ Place on map</button>
+          <button class="btn sm" id="uAddBest">+ Add at best spot</button>
+          <select id="uBulk" class="inline">
+            <option value="">Bulk action…</option>
+            <option value="activate">Activate all</option>
+            <option value="pin">Pin all</option>
+            <option value="unpin">Unpin all</option>
+            <option value="radius">Set all radii to default</option>
+            <option value="rename">Renumber A1, A2…</option>
+            <option value="clear">Remove all</option>
+          </select>
+        </div>
+        <div id="unitList"></div>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>Hospitals <span class="count" id="hCount"></span></summary>
+      <div class="body">
+        <div class="btns3"><button class="btn sm" id="hAddMap">+ Place on map</button><span class="note" style="margin:0">Or search a place above the map.</span></div>
+        <div id="hospList"></div>
+      </div>
+    </details>
+
+    <details class="sec" id="secDemand">
+      <summary>Demand model</summary>
+      <div class="body">
+        <div class="ctl">
+          <label for="demand">Where emergencies come from</label>
+          <select id="demand">
+            <option value="uniform">Spread evenly across the zone</option>
+            <option value="hotspots">Hotspots I place on the map</option>
+            <option value="incidents">Imported past call locations</option>
+          </select>
+        </div>
+        <div id="dmHot">
+          <div class="ctl">
+            <label for="bgR">Background demand <span class="hint">weight outside hotspots</span></label>
+            <div class="row"><input type="range" id="bgR" min="0" max="1" step="0.05"><input type="number" id="bgN" min="0" max="1" step="0.05"></div>
+          </div>
+          <div class="btns3"><button class="btn sm" id="hotAddMap">+ Place hotspot on map</button></div>
+          <div id="hotList"></div>
+        </div>
+        <div id="dmInc">
+          <p class="note">Upload a CSV or paste rows with latitude and longitude. Header names like lat / lng are detected; without a header, the first two numbers are read as lat, lng. Each row counts as one call.</p>
+          <input type="file" id="incFile" accept=".csv,.txt,text/csv">
+          <textarea id="incText" rows="4" placeholder="lat,lng&#10;28.4612,77.0581&#10;28.4950,77.0890"></textarea>
+          <div class="btns3" style="margin-top:6px">
+            <button class="btn sm" id="incImport">Import pasted rows</button>
+            <button class="btn sm" id="incClear">Clear calls</button>
+            <label class="mini"><input type="checkbox" id="incDots"> Show dots</label>
+          </div>
+          <div class="note" id="incInfo"></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="sec">
+      <summary>Assumptions</summary>
+      <div class="body">
+        <div class="ctl">
+          <label for="speedR">Avg traffic speed</label>
+          <div class="row"><input type="range" id="speedR" min="10" max="60" step="1"><input type="number" id="speedN" min="5" max="80" step="1"><span class="unit-l">km/h</span></div>
+        </div>
+        <div class="ctl">
+          <label for="circR">Road circuity factor <span class="hint">1.0 = straight line</span></label>
+          <div class="row"><input type="range" id="circR" min="1" max="1.8" step="0.05"><input type="number" id="circN" min="1" max="2.5" step="0.05"><span class="unit-l">×</span></div>
+        </div>
+        <div class="grid2">
+          <label>Target zone radius<span><input type="number" id="zoneR" min="1" max="50" step="0.5"> km</span></label>
+          <label>Default unit radius<span><input type="number" id="defR" min="0.5" max="25" step="0.5"> km</span></label>
+          <label>Deployment band min<span><input type="number" id="bandMin" min="0" max="49" step="0.5"> km</span></label>
+          <label>Deployment band max<span><input type="number" id="bandMax" min="0.5" max="50" step="0.5"> km</span></label>
+        </div>
+        <div class="ctl">
+          <label for="grid">Calculation grid</label>
+          <select id="grid">
+            <option value="0.15">Fine (150 m), slower</option>
+            <option value="0.25">Standard (250 m)</option>
+            <option value="0.4">Fast (400 m)</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="lock"> Keep dragged ambulances inside the deployment band</label>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>Optimize &amp; fleet sizing</summary>
+      <div class="body">
+        <div class="ctl">
+          <label for="obj">Optimizer goal</label>
+          <select id="obj">
+            <option value="balanced">Balanced: coverage + response</option>
+            <option value="coverage">Maximise coverage</option>
+            <option value="response">Minimise zone-wide response</option>
+          </select>
+        </div>
+        <button id="optBtn" class="btn primary full">Auto-optimize unpinned ambulances</button>
+        <p class="note">Pinned ambulances stay where they are. Others move within the deployment band of their nearest hospital.</p>
+        <div class="ctl" style="margin-top:12px">
+          <label>How many ambulances do we need?</label>
+          <div class="row" style="flex-wrap:wrap"><span class="mini">Test up to</span><input type="number" id="fsMax" min="1" max="40" value="12"><span class="mini">units, target</span><input type="number" id="fsTarget" min="1" max="100" value="80"><span class="mini">% coverage</span></div>
+        </div>
+        <button id="fsBtn" class="btn full">Run fleet sizing</button>
+        <div id="fsOut"></div>
+      </div>
+    </details>
+
+    <details class="sec">
+      <summary>Map &amp; scenario</summary>
+      <div class="body">
+        <div class="ctl">
+          <label for="basemap">Base map</label>
+          <select id="basemap"></select>
+        </div>
+        <div class="ctl">
+          <label for="heat">Overlay</label>
+          <select id="heat">
+            <option value="off">None</option>
+            <option value="time">Response-time heatmap</option>
+            <option value="unit">Nearest-ambulance zones</option>
+            <option value="demand">Demand density</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="rings"> Show deployment band rings</label>
+        <div class="btns">
+          <button id="saveBtn" class="btn">Save scenario</button>
+          <button id="loadBtn" class="btn">Load scenario</button>
+          <button id="csvBtn" class="btn">Export positions (CSV)</button>
+          <button id="resetBtn" class="btn">Reset to default</button>
+        </div>
+        <input type="file" id="loadFile" accept=".json,application/json" hidden>
+        <p class="note">If the map shows a warning or blank tiles instead of streets, pick another base map. Some servers refuse pages opened straight from a file.</p>
+        <p class="note">Your layout autosaves in this browser. Save scenario downloads a .json file you can share or reload.</p>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>Coverage by ring</summary>
+      <div class="body"><div id="rings-out"></div><div id="overlap" class="overlap"></div></div>
+    </details>
+
+    <details class="sec">
+      <summary>Model notes</summary>
+      <div class="body"><ul id="notes"></ul></div>
+    </details>
+  </aside>
+
+  <main class="mapwrap">
+    <div id="map"></div>
+    <div class="search">
+      <input id="q" placeholder="Search a place, or paste lat, lng / Google Maps link" autocomplete="off">
+      <div id="results" class="results"></div>
+    </div>
+    <div id="modeHint" class="mode-hint"></div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script src="leaflet.js"></script>
+<script>
+(function(){
+'use strict';
+
+/* =========================================================
+   Utilities
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let _seq = 0;
+const uid = p => p + Date.now().toString(36) + (++_seq);
+const fmt = (v, d = 1) => isFinite(v) ? v.toFixed(d) : '–';
+const num = v => typeof v === 'number' && isFinite(v);
+const EPS = 0.005;
+let seed = 12345;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+/* local planar projection (km), re-centred on the hospitals */
+const KM_LAT = 6371.0088 * Math.PI / 180;
+let O = { lat: 28.479814, lng: 77.074042 }, KM_LNG = KM_LAT * Math.cos(O.lat * Math.PI / 180);
+function setOrigin(lat, lng) { O = { lat, lng }; KM_LNG = KM_LAT * Math.cos(lat * Math.PI / 180); }
+const xy = p => [(p.lng - O.lng) * KM_LNG, (p.lat - O.lat) * KM_LAT];
+const ll = (x, y) => L.latLng(O.lat + y / KM_LAT, O.lng + x / KM_LNG);
+
+const PAL = ['#2563eb', '#9333ea', '#0d9488', '#d97706', '#db2777', '#65a30d', '#0891b2', '#7c3aed', '#ea580c', '#4f46e5', '#16a34a', '#be123c'];
+const _cc = document.createElement('canvas').getContext('2d');
+function toRGB(c) {
+  _cc.fillStyle = '#000'; _cc.fillStyle = c; const v = _cc.fillStyle;
+  if (v[0] === '#') { const n = parseInt(v.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  const m = v.match(/[\d.]+/g); return m ? m.slice(0, 3).map(Number) : [0, 0, 0];
+}
+
+/* =========================================================
+   State
+   ========================================================= */
+const LS = 'bls-fleet-planner-v2';
+const DEF_SETTINGS = { speed: 30, circ: 1, zoneR: 10, bandMin: 2, bandMax: 4, defR: 3, grid: 0.25, lock: false, obj: 'balanced', demand: 'uniform', bg: 0.2 };
+const DEF_VIEW = { basemap: 'auto', heat: 'off', rings: true, dots: true, theme: null };
+let st, view;
+
+function defaultState() {
+  const h = { id: uid('h'), name: 'PB Health Hospital, IFFCO Chowk', lat: 28.479814, lng: 77.074042 };
+  setOrigin(h.lat, h.lng);
+  const units = [45, 135, 225, 315].map((b, i) => {
+    const t = b * Math.PI / 180, p = ll(3 * Math.sin(t), 3 * Math.cos(t));
+    return { id: uid('u'), name: 'A' + (i + 1), lat: p.lat, lng: p.lng, r: 3, active: true, pinned: false, color: PAL[i] };
+  });
+  return { name: 'PB Health – BLS deployment', hospitals: [h], units, hotspots: [], incidents: [], settings: { ...DEF_SETTINGS } };
+}
+function sanitize(o) {
+  if (!o || typeof o !== 'object') return null;
+  const s = { name: String(o.name || 'Untitled scenario').slice(0, 80), hospitals: [], units: [], hotspots: [], incidents: [], settings: { ...DEF_SETTINGS } };
+  const so = o.settings || {};
+  Object.keys(DEF_SETTINGS).forEach(k => { if (so[k] !== undefined && typeof so[k] === typeof DEF_SETTINGS[k]) s.settings[k] = so[k]; });
+  (o.hospitals || []).forEach((h, i) => { if (h && num(h.lat) && num(h.lng)) s.hospitals.push({ id: String(h.id || uid('h')), name: String(h.name || 'Hospital ' + (i + 1)), lat: h.lat, lng: h.lng }); });
+  (o.units || []).forEach((u, i) => { if (u && num(u.lat) && num(u.lng)) s.units.push({ id: String(u.id || uid('u')), name: String(u.name || 'A' + (i + 1)), lat: u.lat, lng: u.lng, r: num(u.r) ? clamp(u.r, 0.5, 25) : s.settings.defR, active: u.active !== false, pinned: !!u.pinned, color: typeof u.color === 'string' ? u.color : PAL[i % PAL.length] }); });
+  (o.hotspots || []).forEach((h, i) => { if (h && num(h.lat) && num(h.lng)) s.hotspots.push({ id: String(h.id || uid('d')), name: String(h.name || 'D' + (i + 1)), lat: h.lat, lng: h.lng, w: num(h.w) ? clamp(h.w, 0.1, 20) : 1, sigma: num(h.sigma) ? clamp(h.sigma, 0.2, 10) : 1 }); });
+  if (Array.isArray(o.incidents)) s.incidents = o.incidents.filter(p => Array.isArray(p) && num(p[0]) && num(p[1]));
+  return s.hospitals.length ? s : null;
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(LS);
+    if (raw) { const o = JSON.parse(raw), s = sanitize(o); if (s) { st = s; view = { ...DEF_VIEW, ...(o.view || {}) }; return; } }
+  } catch (e) { /* storage unavailable */ }
+  st = defaultState(); view = { ...DEF_VIEW };
+}
+function save() {
+  try {
+    const o = { version: 2, ...st, view };
+    if (st.incidents.length > 20000) o.incidents = [];
+    localStorage.setItem(LS, JSON.stringify(o));
+  } catch (e) { /* storage unavailable */ }
+}
+function nextColor() {
+  const used = new Set(st.units.map(u => u.color));
+  for (const c of PAL) if (!used.has(c)) return c;
+  return `hsl(${Math.round(st.units.length * 137.508) % 360} 65% 45%)`;
+}
+function nextName(list, prefix) {
+  let mx = 0; const re = new RegExp('^' + prefix + '(\\d+)$');
+  list.forEach(e => { const m = String(e.name).match(re); if (m) mx = Math.max(mx, +m[1]); });
+  return prefix + (Math.max(mx, list.length) + 1);
+}
+
+/* =========================================================
+   Demand model
+   ========================================================= */
+let D = null, DC = null, HXY = [], ZB = null;   // fine demand, coarse demand, hospital xy, zone bbox
+
+function hotspotFn() {
+  const s = st.settings;
+  if (s.demand !== 'hotspots' || !st.hotspots.length) return null;
+  const hs = st.hotspots.map(h => { const p = xy(h); return { x: p[0], y: p[1], s2: 2 * h.sigma * h.sigma, w: h.w }; });
+  return (x, y) => { let v = s.bg; for (const h of hs) { const dx = x - h.x, dy = y - h.y; v += h.w * Math.exp(-(dx * dx + dy * dy) / h.s2); } return v; };
+}
+function nearestHosp(x, y) {
+  let best = Infinity, hi = 0;
+  for (let k = 0; k < HXY.length; k++) { const d = Math.hypot(x - HXY[k][0], y - HXY[k][1]); if (d < best) { best = d; hi = k; } }
+  return [best, hi];
+}
+function makeDemand(step, sampleMax) {
+  const s = st.settings, R = s.zoneR, X = [], Y = [], W = [];
+  let mode = 'grid', outside = 0;
+  if (s.demand === 'incidents' && st.incidents.length) {
+    mode = 'points';
+    let arr = st.incidents;
+    if (sampleMax && arr.length > sampleMax) { const k = arr.length / sampleMax; arr = Array.from({ length: sampleMax }, (_, i) => st.incidents[Math.floor(i * k)]); }
+    for (const p of arr) {
+      const [x, y] = xy({ lat: p[0], lng: p[1] });
+      if (nearestHosp(x, y)[0] <= R) { X.push(x); Y.push(y); W.push(1); } else outside++;
+    }
+  } else {
+    const area = (ZB.x1 - ZB.x0) * (ZB.y1 - ZB.y0);
+    step = Math.max(step, Math.sqrt(area / 16000));
+    const hf = hotspotFn();
+    for (let x = ZB.x0 + step / 2; x < ZB.x1; x += step)
+      for (let y = ZB.y0 + step / 2; y < ZB.y1; y += step)
+        if (nearestHosp(x, y)[0] <= R) { X.push(x); Y.push(y); W.push(hf ? hf(x, y) : 1); }
+  }
+  const n = X.length, hd = new Float32Array(n), hi = new Uint16Array(n), ring = new Uint8Array(n);
+  let totW = 0;
+  for (let i = 0; i < n; i++) {
+    const [d, k] = nearestHosp(X[i], Y[i]); hd[i] = d; hi[i] = k;
+    ring[i] = d < s.bandMin ? 0 : d < s.bandMax ? 1 : 2; totW += W[i];
+  }
+  return { n, mode, step, cellKm2: mode === 'grid' ? step * step : 0, x: Float32Array.from(X), y: Float32Array.from(Y), w: Float32Array.from(W), hd, hi, ring, totW, outside };
+}
+function buildDemand() {
+  let la = 0, lo = 0; st.hospitals.forEach(h => { la += h.lat; lo += h.lng; });
+  setOrigin(la / st.hospitals.length, lo / st.hospitals.length);
+  HXY = st.hospitals.map(xy);
+  const R = st.settings.zoneR;
+  ZB = { x0: Math.min(...HXY.map(h => h[0])) - R, x1: Math.max(...HXY.map(h => h[0])) + R, y0: Math.min(...HXY.map(h => h[1])) - R, y1: Math.max(...HXY.map(h => h[1])) + R };
+  D = makeDemand(st.settings.grid, 0);
+  DC = makeDemand(Math.max(0.4, st.settings.grid * 1.8), 3000);
+}
+
+/* =========================================================
+   Metrics engine
+   ========================================================= */
+const NB = 2000, BW = 0.05, HIST = new Float64Array(NB);
+function evalCore(U, d, full) {
+  const m = U.length, nh = HXY.length, s = st.settings, f = s.circ / s.speed * 60;
+  const r = { coverage: 0, overlap: 0, avgResp: NaN, avgReach: NaN, avgCycle: NaN, p90: NaN, avgAll: NaN, share: new Array(m).fill(0),
+              ring: [NaN, NaN, NaN], hosp: HXY.map(() => ({ demand: NaN, cov: NaN, resp: NaN })), covW: 0, totW: d.totW, covN: 0,
+              coveredKm2: NaN, zoneKm2: d.mode === 'grid' ? d.n * d.cellKm2 : NaN, mode: d.mode, n: d.n };
+  if (!d.n || d.totW <= 0) return r;
+  const ux = U.map(u => u.x), uy = U.map(u => u.y), ur = U.map(u => u.r);
+  const UH = new Float64Array(m * nh);
+  for (let j = 0; j < m; j++) for (let h = 0; h < nh; h++) UH[j * nh + h] = Math.hypot(ux[j] - HXY[h][0], uy[j] - HXY[h][1]);
+  let cov = 0, ovl = 0, sR = 0, sH = 0, sC = 0, sA = 0, covN = 0;
+  const share = new Float64Array(m), rT = [0, 0, 0], rC = [0, 0, 0], hT = new Float64Array(nh), hC = new Float64Array(nh), hR = new Float64Array(nh);
+  if (full) HIST.fill(0);
+  for (let i = 0; i < d.n; i++) {
+    const px = d.x[i], py = d.y[i], w = d.w[i];
+    let best = Infinity, bc = Infinity, bi = -1, cnt = 0;
+    for (let j = 0; j < m; j++) {
+      const dx = px - ux[j], dy = py - uy[j], dd = Math.sqrt(dx * dx + dy * dy);
+      if (dd < best) best = dd;
+      if (dd <= ur[j]) { cnt++; if (dd < bc) { bc = dd; bi = j; } }
+    }
+    if (m) sA += best * w;
+    const rg = d.ring[i], hi = d.hi[i];
+    rT[rg] += w; hT[hi] += w;
+    if (cnt) {
+      cov += w; covN++; if (cnt > 1) ovl += w;
+      sR += bc * w; sH += d.hd[i] * w; sC += (bc + d.hd[i] + UH[bi * nh + hi]) * w;
+      share[bi] += w; rC[rg] += w; hC[hi] += w; hR[hi] += bc * w;
+      if (full) HIST[Math.min(NB - 1, (bc / BW) | 0)] += w;
+    }
+  }
+  const T = d.totW;
+  r.coverage = cov / T * 100; r.overlap = cov ? ovl / cov * 100 : 0; r.covW = cov; r.covN = covN;
+  if (cov) { r.avgResp = sR / cov * f; r.avgReach = sH / cov * f; r.avgCycle = sC / cov * f; }
+  if (m) r.avgAll = sA / T * f;
+  r.share = Array.from(share, v => cov ? v / cov * 100 : 0);
+  r.ring = rC.map((c, i) => rT[i] ? c / rT[i] * 100 : NaN);
+  r.hosp = Array.from(hT, (t, h) => ({ demand: t / T * 100, cov: t ? hC[h] / t * 100 : NaN, resp: hC[h] ? hR[h] / hC[h] * f : NaN }));
+  if (d.mode === 'grid') r.coveredKm2 = covN * d.cellKm2;
+  if (full && cov) { let acc = 0; const tgt = 0.9 * cov; for (let b = 0; b < NB; b++) { acc += HIST[b]; if (acc >= tgt) { r.p90 = (b + 1) * BW * f; break; } } }
+  return r;
+}
+
+let US = [], metrics = null;
+function unitStats() {
+  const s = st.settings, f = s.circ / s.speed * 60;
+  return st.units.map(u => {
+    const [x, y] = xy(u), [d, hi] = nearestHosp(x, y);
+    return { x, y, d, hi, dh: d * f, inBand: d >= s.bandMin - EPS && d <= s.bandMax + EPS };
+  });
+}
+function activeU() { const out = []; st.units.forEach((u, i) => { if (u.active) out.push({ x: US[i].x, y: US[i].y, r: u.r, i }); }); return out; }
+function compute() {
+  US = unitStats();
+  const A = activeU();
+  metrics = evalCore(A, D, true);
+  metrics.shareById = {};
+  A.forEach((a, k) => { metrics.shareById[st.units[a.i].id] = metrics.share[k]; });
+}
+
+/* =========================================================
+   Map
+   ========================================================= */
+const map = L.map('map', { zoomSnap: 0.25, zoomControl: true });
+map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
+map.createPane('heat'); map.getPane('heat').style.zIndex = 350; map.getPane('heat').style.pointerEvents = 'none';
+const canvasR = L.canvas({ padding: 0.3 });
+
+const AS = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const ESRI = { maxZoom: 19, attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, USGS, &copy; OpenStreetMap contributors' };
+const ESRI_C = { maxZoom: 19, maxNativeZoom: 16, attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors' };
+const OSMC = { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' };
+const BASEMAPS = {
+  auto:       { label: 'Auto (matches light/dark theme)' },
+  esriStreet: { label: 'Streets – Esri', url: AS + 'World_Street_Map/MapServer/tile/{z}/{y}/{x}', o: ESRI },
+  esriLight:  { label: 'Light grey – Esri', url: AS + 'Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', labels: AS + 'Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', o: ESRI_C },
+  esriDark:   { label: 'Dark grey – Esri', url: AS + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', labels: AS + 'Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', o: ESRI_C },
+  hybrid:     { label: 'Satellite with labels – Esri', url: AS + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', labels: AS + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', o: { maxZoom: 19, attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics' } },
+  esriTopo:   { label: 'Topographic – Esri', url: AS + 'World_Topo_Map/MapServer/tile/{z}/{y}/{x}', o: ESRI },
+  osmHot:     { label: 'OSM Humanitarian (community server)', url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', o: { ...OSMC, subdomains: 'abc', attribution: OSMC.attribution + ', tiles OSM France' } },
+  osmDe:      { label: 'OSM Germany style (community server)', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', o: { ...OSMC, attribution: OSMC.attribution + ', tiles OSM Germany' } },
+  osm:        { label: 'OpenStreetMap standard (website hosting only)', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', o: OSMC }
+};
+const FALLBACK = { esriStreet: 'osmHot', esriLight: 'esriStreet', esriDark: 'esriStreet', hybrid: 'esriStreet', esriTopo: 'esriStreet', osmHot: 'esriStreet', osmDe: 'esriStreet', osm: 'esriStreet' };
+$('basemap').innerHTML = Object.entries(BASEMAPS).map(([k, b]) => `<option value="${k}">${esc(b.label)}</option>`).join('');
+let baseLayers = [], baseKey = null;
+function resolveBase() {
+  if (!BASEMAPS[view.basemap]) view.basemap = 'auto';
+  return view.basemap === 'auto' ? (document.documentElement.dataset.theme === 'dark' ? 'esriDark' : 'esriStreet') : view.basemap;
+}
+function setBasemap(key, fromFallback) {
+  key = key || resolveBase();
+  if (key === baseKey && !fromFallback) return;
+  baseLayers.forEach(l => map.removeLayer(l)); baseLayers = []; baseKey = key;
+  const b = BASEMAPS[key];
+  const t = L.tileLayer(b.url, b.o); let ok = 0, bad = 0;
+  t.on('tileload', () => { ok++; });
+  t.on('tileerror', () => { bad++; if (bad === 8 && ok === 0 && FALLBACK[key] && baseKey === key) { const fb = FALLBACK[key]; showToast(`${b.label} did not load here, switched to ${BASEMAPS[fb].label}.`); setBasemap(fb, true); } });
+  t.addTo(map); t.bringToBack(); baseLayers.push(t);
+  if (b.labels) { const lt = L.tileLayer(b.labels, { maxZoom: 19, maxNativeZoom: b.o.maxNativeZoom || 19 }); lt.addTo(map); baseLayers.push(lt); }
+}
+
+const zoneG = L.layerGroup().addTo(map);
+const hospG = L.layerGroup().addTo(map);
+const hotG = L.layerGroup().addTo(map);
+const incG = L.layerGroup().addTo(map);
+const unitG = L.layerGroup().addTo(map);
+const uL = {}, hL = {}, dL = {};
+
+function circlePts(cx, cy, r, n = 96) { return Array.from({ length: n }, (_, i) => { const t = i / n * 2 * Math.PI; return ll(cx + r * Math.sin(t), cy + r * Math.cos(t)); }); }
+function renderZone() {
+  zoneG.clearLayers();
+  const s = st.settings;
+  HXY.forEach(([hx, hy]) => {
+    if (view.rings) {
+      const rings = s.bandMin > 0 ? [circlePts(hx, hy, s.bandMax), circlePts(hx, hy, s.bandMin)] : [circlePts(hx, hy, s.bandMax)];
+      L.polygon(rings, { stroke: false, fillColor: '#16a34a', fillOpacity: .08, interactive: false }).addTo(zoneG);
+      if (s.bandMin > 0) {
+        L.circle(ll(hx, hy), { radius: s.bandMin * 1000, color: '#16a34a', weight: 1.5, dashArray: '6 6', fill: false, interactive: false }).addTo(zoneG);
+        ringLabel(hx, hy + s.bandMin, `${s.bandMin} km`, '#16a34a');
+      }
+      L.circle(ll(hx, hy), { radius: s.bandMax * 1000, color: '#d97706', weight: 1.5, dashArray: '6 6', fill: false, interactive: false }).addTo(zoneG);
+      ringLabel(hx, hy + s.bandMax, `${s.bandMax} km`, '#d97706');
+    }
+    L.circle(ll(hx, hy), { radius: s.zoneR * 1000, color: '#dc2626', weight: 2, fill: false, interactive: false }).addTo(zoneG);
+    ringLabel(hx, hy + s.zoneR, `${s.zoneR} km zone`, '#dc2626');
+  });
+}
+function ringLabel(x, y, t, c) {
+  L.marker(ll(x, y), { icon: L.divIcon({ className: 'mk', html: `<span class="rl" style="--c:${c}">${esc(t)}</span>`, iconSize: [0, 0] }), interactive: false, keyboard: false }).addTo(zoneG);
+}
+
+function renderHospitals() {
+  hospG.clearLayers(); Object.keys(hL).forEach(k => delete hL[k]);
+  st.hospitals.forEach((h, k) => {
+    const m = L.marker([h.lat, h.lng], {
+      draggable: true, autoPan: true, zIndexOffset: 1000,
+      icon: L.divIcon({ className: 'mk', html: `<div class="hosp">+</div><div class="tag htag">H${k + 1} · ${esc(h.name.length > 26 ? h.name.slice(0, 25) + '…' : h.name)}</div>`, iconSize: [0, 0] })
+    }).addTo(hospG);
+    m.on('dragstart', () => beginChange(`Moving ${h.name}`, true));
+    m.on('drag', () => { const p = m.getLatLng(); h.lat = p.lat; h.lng = p.lng; schedule({ rebuild: true, zone: true }); });
+    m.on('dragend', () => { flushSchedule(); renderHospList(); endChange(); });
+    hL[h.id] = m;
+  });
+}
+
+function renderUnits() {
+  unitG.clearLayers(); Object.keys(uL).forEach(k => delete uL[k]);
+  st.units.forEach((u, i) => {
+    const line = L.polyline([[u.lat, u.lng], [u.lat, u.lng]], { color: u.color, weight: 1.6, dashArray: '4 6', opacity: .85, interactive: false }).addTo(unitG);
+    const circ = L.circle([u.lat, u.lng], { radius: u.r * 1000, color: u.color, weight: 1.6, fillColor: u.color, fillOpacity: .12, interactive: false }).addTo(unitG);
+    const m = L.marker([u.lat, u.lng], {
+      draggable: true, autoPan: true, zIndexOffset: 500,
+      icon: L.divIcon({ className: 'mk', html: `<div class="amb" style="--c:${u.color}">${esc(u.name)}</div><div class="tag"></div>`, iconSize: [0, 0] })
+    }).addTo(unitG);
+    m.on('dragstart', () => beginChange('Moving ' + u.name, true));
+    m.on('drag', () => onUnitDrag(u, m));
+    m.on('dragend', () => { onUnitDrag(u, m); flushSchedule(); updateCoordInputs(); endChange(); });
+    uL[u.id] = { m, circ, line };
+  });
+}
+function projectToBand(x, y) {
+  const s = st.settings, [d, hi] = nearestHosp(x, y), [hx, hy] = HXY[hi];
+  if (d >= s.bandMin && d <= s.bandMax) return [x, y];
+  if (d < 1e-6) return [hx, hy + Math.max(s.bandMin, 0.01)];
+  const k = clamp(d, s.bandMin, s.bandMax) / d;
+  return [hx + (x - hx) * k, hy + (y - hy) * k];
+}
+function onUnitDrag(u, m) {
+  let p = m.getLatLng();
+  if (st.settings.lock) {
+    const [x, y] = xy(p), [px, py] = projectToBand(x, y);
+    if (px !== x || py !== y) { p = ll(px, py); m.setLatLng(p); }
+  }
+  u.lat = p.lat; u.lng = p.lng;
+  schedule();
+}
+function placeUnitGeom() {
+  st.units.forEach((u, i) => {
+    const L_ = uL[u.id]; if (!L_) return;
+    const s = US[i], h = st.hospitals[s.hi];
+    L_.circ.setLatLng([u.lat, u.lng]); L_.circ.setRadius(u.r * 1000);
+    L_.circ.setStyle(u.active ? { color: u.color, fillColor: u.color, fillOpacity: .12, dashArray: null, opacity: 1 } : { color: '#94a3b8', fillOpacity: 0, dashArray: '3 5', opacity: .8 });
+    L_.line.setLatLngs([[u.lat, u.lng], [h.lat, h.lng]]);
+    L_.line.setStyle({ opacity: u.active ? .85 : 0 });
+    const el = L_.m.getElement();
+    if (el) {
+      const a = el.querySelector('.amb'), t = el.querySelector('.tag');
+      a.classList.toggle('out', u.active && !s.inBand); a.classList.toggle('off', !u.active); a.classList.toggle('pin', u.pinned);
+      t.textContent = u.active ? `${s.d.toFixed(2)} km${st.hospitals.length > 1 ? ' · H' + (s.hi + 1) : ''}` : 'inactive';
+      t.classList.toggle('out', u.active && !s.inBand);
+    }
+  });
+}
+
+function renderHotspots() {
+  hotG.clearLayers(); Object.keys(dL).forEach(k => delete dL[k]);
+  if (st.settings.demand !== 'hotspots') return;
+  st.hotspots.forEach(h => {
+    const circ = L.circle([h.lat, h.lng], { radius: h.sigma * 2000, color: '#f97316', weight: 1.4, dashArray: '2 5', fill: true, fillOpacity: .05, interactive: false }).addTo(hotG);
+    const m = L.marker([h.lat, h.lng], { draggable: true, zIndexOffset: 400, icon: L.divIcon({ className: 'mk', html: `<div class="hot">${esc(h.name.slice(0, 3))}</div>`, iconSize: [0, 0] }) }).addTo(hotG);
+    m.bindTooltip(`${esc(h.name)} · weight ${h.w} · spread ${h.sigma} km`, { direction: 'top', offset: [0, -14] });
+    m.on('dragstart', () => beginChange('Moving hotspot ' + h.name, true));
+    m.on('drag', () => { const p = m.getLatLng(); h.lat = p.lat; h.lng = p.lng; circ.setLatLng(p); schedule({ rebuild: true }); });
+    m.on('dragend', () => { flushSchedule(); renderHotList(); endChange(); });
+    dL[h.id] = m;
+  });
+}
+function renderIncidents() {
+  incG.clearLayers();
+  if (st.settings.demand !== 'incidents' || !view.dots || !st.incidents.length) return;
+  const arr = st.incidents, k = Math.max(1, Math.ceil(arr.length / 6000));
+  for (let i = 0; i < arr.length; i += k)
+    L.circleMarker(arr[i], { renderer: canvasR, radius: 2.2, stroke: false, fillColor: '#ef4444', fillOpacity: .7, interactive: false }).addTo(incG);
+}
+
+/* heat overlay */
+const hc = document.createElement('canvas'), hctx = hc.getContext('2d');
+let heatLayer = null;
+const TB = [4, 8, 12, 16], TC = [[34, 197, 94], [132, 204, 22], [234, 179, 8], [249, 115, 22], [239, 68, 68]];
+function drawHeat() {
+  if (view.heat === 'off' || (view.heat === 'demand' && st.settings.demand === 'incidents')) { if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; } return; }
+  const s = st.settings, R = s.zoneR, bw = ZB.x1 - ZB.x0, bh = ZB.y1 - ZB.y0, MAXP = 260;
+  const W = Math.max(2, Math.round(bw >= bh ? MAXP : MAXP * bw / bh)), H = Math.max(2, Math.round(bh >= bw ? MAXP : MAXP * bh / bw));
+  if (hc.width !== W || hc.height !== H) { hc.width = W; hc.height = H; }
+  const img = hctx.createImageData(W, H), d = img.data, f = s.circ / s.speed * 60;
+  const A = activeU(), cols = A.map(a => toRGB(st.units[a.i].color));
+  const hf = view.heat === 'demand' ? hotspotFn() : null;
+  let wmax = 1; if (hf) { wmax = s.bg; st.hotspots.forEach(h => { wmax += h.w; }); wmax = Math.max(wmax, 1e-6); }
+  for (let py = 0; py < H; py++) {
+    const y = ZB.y1 - (py + .5) / H * bh;
+    for (let px = 0; px < W; px++) {
+      const x = ZB.x0 + (px + .5) / W * bw, o = (py * W + px) * 4;
+      if (nearestHosp(x, y)[0] > R) continue;
+      if (view.heat === 'demand') {
+        const v = hf ? clamp(hf(x, y) / wmax, 0, 1) : 0.4;
+        d[o] = 249; d[o + 1] = 115; d[o + 2] = 22; d[o + 3] = Math.round(20 + 170 * v); continue;
+      }
+      if (!A.length) continue;
+      let best = Infinity, bi = 0, inC = false;
+      for (let j = 0; j < A.length; j++) { const dd = Math.hypot(x - A[j].x, y - A[j].y); if (dd < best) { best = dd; bi = j; } if (dd <= A[j].r) inC = true; }
+      let c, a;
+      if (view.heat === 'time') { const t = best * f, k = t <= TB[0] ? 0 : t <= TB[1] ? 1 : t <= TB[2] ? 2 : t <= TB[3] ? 3 : 4; c = TC[k]; a = inC ? 125 : 90; }
+      else { c = cols[bi]; a = inC ? 95 : 35; }
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = a;
+    }
+  }
+  hctx.putImageData(img, 0, 0);
+  const bounds = L.latLngBounds(ll(ZB.x0, ZB.y0), ll(ZB.x1, ZB.y1)), url = hc.toDataURL();
+  if (!heatLayer) heatLayer = L.imageOverlay(url, bounds, { pane: 'heat', interactive: false }).addTo(map);
+  else { heatLayer.setUrl(url); heatLayer.setBounds(bounds); }
+}
+
+/* legend */
+const legend = L.control({ position: 'bottomright' });
+legend.onAdd = () => {
+  const el = L.DomUtil.create('details', 'legend'); el.id = 'legend';
+  if (window.innerWidth > 900) el.open = true;
+  L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el);
+  return el;
+};
+legend.addTo(map);
+function renderLegend() {
+  const s = st.settings;
+  let h = '<summary>Map key</summary>' +
+    '<div class="lg"><i class="sw" style="background:#e11d48;border-radius:3px"></i>Hospital</div>' +
+    '<div class="lg"><i class="sw" style="background:#2563eb;border-radius:6px"></i>Ambulance (drag to move)</div>' +
+    (view.rings ? `<div class="lg"><i class="sw" style="background:rgba(22,163,74,.25)"></i>${s.bandMin}–${s.bandMax} km deployment band</div>` : '') +
+    `<div class="lg"><i class="sw" style="border:2px solid #dc2626"></i>${s.zoneR} km target zone</div>` +
+    '<div class="lg"><i class="sw" style="background:rgba(37,99,235,.2);border:1.5px solid #2563eb"></i>Ambulance radius</div>';
+  if (s.demand === 'hotspots') h += '<div class="lg"><i class="sw" style="background:#f97316;border-radius:6px"></i>Demand hotspot</div>';
+  if (s.demand === 'incidents' && view.dots) h += '<div class="lg"><i class="sw" style="background:#ef4444;border-radius:6px;width:8px;height:8px"></i>Past call</div>';
+  if (view.heat === 'time') {
+    const lab = ['≤ 4 min', '4–8 min', '8–12 min', '12–16 min', '> 16 min'];
+    h += '<div class="lg" style="font-weight:700;margin-top:7px">Nearest-unit response</div>' + TC.map((c, i) => `<div class="lg"><i class="sw" style="background:rgba(${c},.7)"></i>${lab[i]}</div>`).join('');
+  } else if (view.heat === 'demand') {
+    h += '<div class="lg" style="font-weight:700;margin-top:7px">Demand density</div><div class="lg"><i class="sw" style="background:linear-gradient(90deg,rgba(249,115,22,.1),rgba(249,115,22,.75));width:60px"></i>low → high</div>';
+  }
+  $('legend').innerHTML = h;
+}
+
+/* =========================================================
+   Change tracking, undo, impact
+   ========================================================= */
+let deltaRef = null, pending = null, toastTimer = 0;
+let undoStack = [], redoStack = [];
+const log = [];
+const dv = (a, b) => a - b;
+const big = (v, t = 0.05) => isFinite(v) && Math.abs(v) >= t;
+
+function snapshot() { return { json: JSON.stringify({ name: st.name, hospitals: st.hospitals, units: st.units, hotspots: st.hotspots, settings: st.settings }), inc: st.incidents }; }
+function restore(snap) { const o = JSON.parse(snap.json); Object.assign(st, o); st.incidents = snap.inc; syncControls(); rebuildAll(); }
+function beginChange(label, live = false) {
+  if (!pending) pending = { label, before: metrics, snap: snapshot(), live };
+  deltaRef = pending.before;
+}
+function endChange(label) {
+  if (!pending) return;
+  const p = pending; pending = null;
+  const now = snapshot();
+  if (now.json !== p.snap.json || now.inc !== p.snap.inc) { undoStack.push(p.snap); if (undoStack.length > 80) undoStack.shift(); redoStack = []; }
+  save(); updateUndo();
+  commit(label || p.label, p.before, metrics);
+}
+function change(label, fn) { beginChange(label); fn(); rebuildAll(); endChange(); }
+function undo() { if (!undoStack.length) return; const b = metrics; redoStack.push(snapshot()); restore(undoStack.pop()); save(); updateUndo(); deltaRef = b; commit('Undo', b, metrics); }
+function redo() { if (!redoStack.length) return; const b = metrics; undoStack.push(snapshot()); restore(redoStack.pop()); save(); updateUndo(); deltaRef = b; commit('Redo', b, metrics); }
+function updateUndo() { $('undoBtn').disabled = !undoStack.length; $('redoBtn').disabled = !redoStack.length; }
+
+function covLabel() { const s = st.settings; return s.demand === 'uniform' ? `${s.zoneR} km zone coverage` : s.demand === 'incidents' && st.incidents.length ? 'share of past calls covered' : 'weighted demand coverage'; }
+function sentence(label, b, a) {
+  const dR = dv(a.avgResp, b.avgResp), dC = a.coverage - b.coverage;
+  let r;
+  if (!isFinite(dR)) r = isFinite(a.avgResp) ? `set avg response time to ${a.avgResp.toFixed(1)} min` : 'left nothing covered';
+  else if (Math.abs(dR) < 0.05) r = 'left avg response time unchanged';
+  else r = `${dR < 0 ? 'reduced' : 'increased'} avg response time by ${Math.abs(dR).toFixed(1)} min`;
+  const c = Math.abs(dC) < 0.05 ? `kept ${covLabel()} flat` : `${dC > 0 ? 'raised' : 'cut'} ${covLabel()} by ${Math.abs(dC).toFixed(1)} pts`;
+  const conj = ((dR < -0.05 && dC < -0.05) || (dR > 0.05 && dC > 0.05)) ? ' but ' : ' and ';
+  return `${esc(label)} ${r}${conj}${c}.`;
+}
+function secondary(b, a) {
+  const out = [];
+  const p = (l, v, u) => { if (!big(v)) return; out.push(`<span class="${v < 0 ? 'dg' : 'db'}">${l} ${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}${u}</span>`); };
+  p('Hospital reach', dv(a.avgReach, b.avgReach), ' min');
+  p('Full-cycle TAT', dv(a.avgCycle, b.avgCycle), ' min');
+  p('P90', dv(a.p90, b.p90), ' min');
+  p('Zone-wide response', dv(a.avgAll, b.avgAll), ' min');
+  p('Overlap', a.overlap - b.overlap, ' pts');
+  return out.join(' · ') || 'Other metrics unchanged.';
+}
+function commit(label, b, a) {
+  deltaRef = b; renderKPIs();
+  if (!b) return;
+  const changed = big(a.coverage - b.coverage) || big(dv(a.avgResp, b.avgResp)) || big(dv(a.avgCycle, b.avgCycle)) || big(dv(a.avgAll, b.avgAll)) || (isFinite(a.avgResp) !== isFinite(b.avgResp));
+  if (!changed) { $('impact').innerHTML = `<p class="lead">${esc(label)}: no measurable change to the KPIs.</p>`; showToast(`${esc(label)}: no measurable change.`); return; }
+  const s = sentence(label, b, a);
+  $('impact').innerHTML = `<p class="lead">${s}</p><p class="sub">${secondary(b, a)}</p>`;
+  log.unshift({ t: new Date(), s }); if (log.length > 12) log.length = 12;
+  $('log').innerHTML = log.map(e => `<li><time>${e.t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>${e.s}</li>`).join('');
+  showToast(s);
+}
+function showToast(html, sticky) {
+  const t = $('toast'); t.innerHTML = html; t.classList.add('show');
+  clearTimeout(toastTimer);
+  if (!sticky) toastTimer = setTimeout(() => t.classList.remove('show'), 6000);
+}
+function liveToast() {
+  const b = pending.before, a = metrics; if (!b) return;
+  const f = (v, u, lo) => { if (!isFinite(v)) return '–'; const z = Math.abs(v) < 0.05; return `<span class="${z ? 'd0' : ((lo ? v < 0 : v > 0) ? 'dg' : 'db')}">${z ? '±0' : (v > 0 ? '+' : '−') + Math.abs(v).toFixed(1)}${u}</span>`; };
+  showToast(`${esc(pending.label)} · Coverage ${f(a.coverage - b.coverage, ' pts', false)} · Avg response ${f(dv(a.avgResp, b.avgResp), ' min', true)} · Full-cycle TAT ${f(dv(a.avgCycle, b.avgCycle), ' min', true)}`, true);
+}
+
+/* =========================================================
+   Sidebar rendering
+   ========================================================= */
+const KPI = [
+  { k: 'coverage', l: () => st.settings.demand === 'uniform' ? `${st.settings.zoneR} km zone coverage` : 'Demand coverage', u: '%', du: ' pts', d: 1, lo: false,
+    s: m => m.mode === 'grid' ? (st.settings.demand === 'hotspots' && st.hotspots.length ? 'Hotspot-weighted share inside a unit radius' : `${fmt(m.coveredKm2, 0)} of ${fmt(m.zoneKm2, 0)} km² inside a unit radius`) : `${m.covN} of ${m.n} past calls inside a unit radius` },
+  { k: 'avgResp', l: () => 'Avg response time', u: 'min', du: ' min', d: 1, lo: true, s: () => 'Base → incident · covered area' },
+  { k: 'avgReach', l: () => 'Avg hospital reach', u: 'min', du: ' min', d: 1, lo: true, s: () => 'Incident → nearest hospital' },
+  { k: 'avgCycle', l: () => 'Avg full-cycle TAT', u: 'min', du: ' min', d: 1, lo: true, s: () => 'Base → incident → hospital → base' },
+  { k: 'p90', l: () => 'P90 response time', u: 'min', du: ' min', d: 1, lo: true, s: () => '9 in 10 covered calls reached within' },
+  { k: 'avgAll', l: () => 'Zone-wide response', u: 'min', du: ' min', d: 1, lo: true, s: () => 'Nearest active unit · whole zone' }
+];
+$('kpis').innerHTML = KPI.map(k => `<div class="kpi" id="kp-${k.k}"><div class="kl"></div><div class="kv"><span class="v">–</span><span class="u">${k.u}</span></div><div class="kd"></div><div class="ks"></div></div>`).join('');
+function deltaHTML(v, d, lo, unit) {
+  if (!isFinite(v)) return '<span class="d0">–</span>';
+  if (Math.abs(v) < Math.pow(10, -d) / 2) return '<span class="d0">±0</span>';
+  return `<span class="${(lo ? v < 0 : v > 0) ? 'dg' : 'db'}">${v > 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(d)}${unit}</span>`;
+}
+function renderKPIs() {
+  KPI.forEach(k => {
+    const el = $('kp-' + k.k), v = metrics[k.k];
+    el.querySelector('.kl').textContent = k.l();
+    el.querySelector('.v').textContent = fmt(v, k.d);
+    el.querySelector('.ks').textContent = k.s(metrics);
+    el.querySelector('.kd').innerHTML = deltaRef ? deltaHTML(dv(v, deltaRef[k.k]), k.d, k.lo, k.du) : '<span class="d0">Baseline</span>';
+  });
+}
+
+function renderUnitList() {
+  $('uCount').textContent = `${st.units.filter(u => u.active).length} active / ${st.units.length}`;
+  if (!st.units.length) { $('unitList').innerHTML = '<p class="note">No ambulances yet. Use “Place on map”, “Add at best spot”, or run fleet sizing.</p>'; return; }
+  $('unitList').innerHTML = st.units.map(u => `
+    <div class="ent${u.active ? '' : ' off'}" style="--c:${u.color}" data-id="${esc(u.id)}">
+      <div class="ent-h">
+        <span class="dot"></span>
+        <input class="name" value="${esc(u.name)}" data-act="name" aria-label="Ambulance name">
+        <span class="chip" data-f="chip"></span>
+        <button class="ico" data-act="locate">Locate</button>
+        <button class="ico" data-act="dup" title="Duplicate">⧉</button>
+        <button class="ico del" data-act="del" title="Remove">✕</button>
+      </div>
+      <div class="ent-g">
+        <div><span class="lbl">Nearest hospital</span><span class="val" data-f="dist"></span></div>
+        <div><span class="lbl">Base → hospital</span><span class="val" data-f="dh"></span></div>
+        <div><span class="lbl">Primary for</span><span class="val" data-f="share"></span></div>
+      </div>
+      <div class="ent-f">
+        <label class="mini">Radius <input type="number" min="0.5" max="25" step="0.5" value="${u.r}" data-act="radius"> km</label>
+        <label class="mini"><input type="checkbox" data-act="active"${u.active ? ' checked' : ''}> Active</label>
+        <label class="mini" title="Pinned ambulances are not moved by Auto-optimize"><input type="checkbox" data-act="pin"${u.pinned ? ' checked' : ''}> Pinned</label>
+      </div>
+      <input class="coord" data-act="coord" value="${u.lat.toFixed(6)}, ${u.lng.toFixed(6)}" title="Paste coordinates or a Google Maps link, then press Enter" aria-label="Coordinates">
+    </div>`).join('');
+}
+function updateUnitRows() {
+  const multi = st.hospitals.length > 1;
+  st.units.forEach((u, i) => {
+    const row = $('unitList').querySelector(`[data-id="${CSS.escape(u.id)}"]`); if (!row) return;
+    const s = US[i], chip = row.querySelector('[data-f=chip]');
+    if (!u.active) { chip.textContent = 'Inactive'; chip.className = 'chip off'; }
+    else if (s.inBand) { chip.textContent = 'In band'; chip.className = 'chip ok'; }
+    else { chip.textContent = s.d < st.settings.bandMin ? 'Too close' : 'Too far'; chip.className = 'chip bad'; }
+    const dist = row.querySelector('[data-f=dist]');
+    dist.textContent = `${s.d.toFixed(2)} km${multi ? ' · H' + (s.hi + 1) : ''}`; dist.className = 'val' + (u.active && !s.inBand ? ' bad' : '');
+    row.querySelector('[data-f=dh]').textContent = `${s.dh.toFixed(1)} min`;
+    row.querySelector('[data-f=share]').textContent = u.active ? `${fmt(metrics.shareById[u.id] || 0, 0)}% of covered` : '–';
+  });
+}
+function updateCoordInputs() {
+  st.units.forEach(u => { const row = $('unitList').querySelector(`[data-id="${CSS.escape(u.id)}"] [data-act=coord]`); if (row && document.activeElement !== row) row.value = `${u.lat.toFixed(6)}, ${u.lng.toFixed(6)}`; });
+}
+
+function renderHospList() {
+  $('hCount').textContent = st.hospitals.length;
+  const one = st.hospitals.length === 1;
+  $('hospList').innerHTML = st.hospitals.map((h, k) => `
+    <div class="ent" style="--c:#e11d48" data-id="${esc(h.id)}">
+      <div class="ent-h">
+        <span class="chip" style="background:#e11d48;color:#fff">H${k + 1}</span>
+        <input class="name" value="${esc(h.name)}" data-act="name" aria-label="Hospital name">
+        <button class="ico" data-act="locate">Locate</button>
+        <button class="ico del" data-act="del" title="${one ? 'At least one hospital is needed' : 'Remove'}"${one ? ' disabled' : ''}>✕</button>
+      </div>
+      <div class="ent-g">
+        <div><span class="lbl">Share of demand</span><span class="val" data-f="dem"></span></div>
+        <div><span class="lbl">Covered</span><span class="val" data-f="cov"></span></div>
+        <div><span class="lbl">Avg response</span><span class="val" data-f="resp"></span></div>
+      </div>
+      <input class="coord" data-act="coord" value="${h.lat.toFixed(6)}, ${h.lng.toFixed(6)}" title="Paste coordinates or a Google Maps link, then press Enter" aria-label="Coordinates">
+    </div>`).join('');
+}
+function updateHospRows() {
+  st.hospitals.forEach((h, k) => {
+    const row = $('hospList').querySelector(`[data-id="${CSS.escape(h.id)}"]`); if (!row) return;
+    const m = metrics.hosp[k] || {};
+    row.querySelector('[data-f=dem]').textContent = `${fmt(m.demand, 0)}%`;
+    row.querySelector('[data-f=cov]').textContent = `${fmt(m.cov, 0)}%`;
+    row.querySelector('[data-f=resp]').textContent = isFinite(m.resp) ? `${m.resp.toFixed(1)} min` : '–';
+    const c = row.querySelector('[data-act=coord]'); if (document.activeElement !== c) c.value = `${h.lat.toFixed(6)}, ${h.lng.toFixed(6)}`;
+  });
+}
+
+function renderHotList() {
+  if (!st.hotspots.length) { $('hotList').innerHTML = '<p class="note">No hotspots yet. Place one where calls cluster: a highway junction, market, industrial area or dense housing.</p>'; return; }
+  $('hotList').innerHTML = st.hotspots.map(h => `
+    <div class="ent" style="--c:#f97316" data-id="${esc(h.id)}">
+      <div class="ent-h">
+        <input class="name" value="${esc(h.name)}" data-act="name" aria-label="Hotspot name">
+        <button class="ico" data-act="locate">Locate</button>
+        <button class="ico del" data-act="del" title="Remove">✕</button>
+      </div>
+      <div class="ent-f">
+        <label class="mini">Weight <input type="number" min="0.1" max="20" step="0.1" value="${h.w}" data-act="w"></label>
+        <label class="mini">Spread <input type="number" min="0.2" max="10" step="0.1" value="${h.sigma}" data-act="sigma"> km</label>
+      </div>
+      <input class="coord" data-act="coord" value="${h.lat.toFixed(6)}, ${h.lng.toFixed(6)}" aria-label="Coordinates">
+    </div>`).join('');
+}
+function renderDemandPanel() {
+  const m = st.settings.demand;
+  $('dmHot').style.display = m === 'hotspots' ? '' : 'none';
+  $('dmInc').style.display = m === 'incidents' ? '' : 'none';
+  $('incInfo').textContent = st.incidents.length ? `${st.incidents.length.toLocaleString()} calls loaded${D && D.mode === 'points' && D.outside ? `, ${D.outside.toLocaleString()} fall outside the target zone and are ignored` : ''}.` : 'No calls loaded yet. Until you import some, demand is treated as spread evenly.';
+  renderHotList();
+}
+
+function renderAlerts() {
+  const s = st.settings, out = [];
+  st.units.forEach((u, i) => { if (u.active && !US[i].inBand) out.push(`<div class="alert bad">⚠ ${esc(u.name)} is ${US[i].d.toFixed(2)} km from ${esc(st.hospitals[US[i].hi].name)}, ${US[i].d < s.bandMin ? 'inside' : 'outside'} the ${s.bandMin}–${s.bandMax} km band</div>`); });
+  if (!st.units.some(u => u.active)) out.push('<div class="alert warn">No active ambulances. Add or activate one to see coverage.</div>');
+  if (s.demand === 'incidents' && !st.incidents.length) out.push('<div class="alert warn">Demand is set to imported calls but none are loaded, so demand is treated as even.</div>');
+  if (s.demand === 'hotspots' && !st.hotspots.length) out.push('<div class="alert warn">Demand is set to hotspots but none are placed, so demand is treated as even.</div>');
+  if (!out.length) out.push(`<div class="alert ok">All ${st.units.filter(u => u.active).length} active ambulances are inside the ${s.bandMin}–${s.bandMax} km band</div>`);
+  $('alerts').innerHTML = out.join('');
+}
+function renderCoverage() {
+  const s = st.settings, RL = [`0–${s.bandMin} km`, `${s.bandMin}–${s.bandMax} km`, `${s.bandMax}–${s.zoneR} km`];
+  $('rings-out').innerHTML = metrics.ring.map((v, i) => `<div class="bar"><span>${RL[i]}</span><span class="bt"><span style="width:${isFinite(v) ? v.toFixed(1) : 0}%"></span></span><span class="bv">${fmt(v, 0)}%</span></div>`).join('');
+  $('overlap').textContent = `${fmt(metrics.overlap, 0)}% of covered demand is reachable by two or more units (backup for simultaneous calls).`;
+}
+function renderNotes() {
+  const s = st.settings;
+  const dm = s.demand === 'uniform' ? `Emergencies are spread evenly across the ${s.zoneR} km zone around every hospital, sampled on a grid of about ${Math.round(D.step * 1000)} m (${D.n.toLocaleString()} points).`
+    : s.demand === 'hotspots' ? 'Emergencies follow the hotspots you placed: each adds a bell-shaped bump (weight × spread) on top of the background level.'
+    : `Emergencies are your ${st.incidents.length.toLocaleString()} imported calls inside the zone, each counted once.`;
+  $('notes').innerHTML = [
+    dm,
+    `Travel time = straight-line km × circuity (${s.circ}) ÷ ${s.speed} km/h × 60. Raise circuity above 1.0 to reflect road detours.`,
+    'Each call goes to the nearest active ambulance whose radius covers it. Assumes the unit is free: no simultaneous calls or downtime.',
+    'Hospital reach and full-cycle TAT use the hospital nearest the incident. Full cycle excludes on-scene and handover time.',
+    'Auto-optimize and fleet sizing run on a coarser grid for speed, so their numbers can differ slightly from the live KPIs.'
+  ].map(t => `<li>${esc(t)}</li>`).join('');
+}
+
+/* =========================================================
+   Refresh pipeline
+   ========================================================= */
+let flags = { rebuild: false, zone: false }, raf = 0;
+function schedule(o = {}) {
+  if (o.rebuild) flags.rebuild = true; if (o.zone) flags.zone = true;
+  if (!raf) raf = requestAnimationFrame(flushSchedule);
+}
+function flushSchedule() {
+  if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  const f = flags; flags = { rebuild: false, zone: false };
+  if (f.rebuild) buildDemand();
+  if (f.zone) renderZone();
+  refresh();
+}
+function refresh() {
+  compute(); placeUnitGeom(); renderKPIs(); renderAlerts(); updateUnitRows(); updateHospRows(); renderCoverage(); drawHeat();
+  if (pending && pending.live) liveToast();
+}
+function rebuildAll() {
+  buildDemand(); renderZone(); renderHospitals(); renderUnits(); renderHotspots(); renderIncidents();
+  renderUnitList(); renderHospList(); renderDemandPanel(); renderLegend();
+  refresh(); renderNotes(); $('scName').value = st.name;
+}
+
+/* =========================================================
+   Coordinates & search
+   ========================================================= */
+function parseLatLng(str) {
+  let s = String(str || '').trim(); try { s = decodeURIComponent(s); } catch (e) {}
+  const pats = [
+    [/@(-?\d+\.\d+),\s*(-?\d+\.\d+)/, 'll'], [/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, 'll'], [/!2d(-?\d+\.\d+)!3d(-?\d+\.\d+)/, 'gl'],
+    [/[?&](?:q|query|ll|center|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/, 'll'], [/^\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*$/, 'll']
+  ];
+  for (const [re, ord] of pats) {
+    const m = s.match(re); if (!m) continue;
+    let lat = +m[1], lng = +m[2]; if (ord === 'gl') [lat, lng] = [lng, lat];
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return L.latLng(lat, lng);
+  }
+  return null;
+}
+let lastResults = [], sTimer = 0, sCtl = null;
+const resultsEl = $('results');
+function hideResults() { resultsEl.classList.remove('show'); }
+function showResults(items) {
+  lastResults = items;
+  resultsEl.innerHTML = items.map((r, i) => `<button data-i="${i}">${esc(r.name)}<small>${esc(r.sub || '')}</small></button>`).join('');
+  resultsEl.classList.add('show');
+}
+function msg(t) { resultsEl.innerHTML = `<div class="msg">${t}</div>`; resultsEl.classList.add('show'); }
+resultsEl.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) pickResult(+b.dataset.i); });
+function pickResult(i) {
+  const r = lastResults[i]; if (!r) return; hideResults();
+  const p = L.latLng(r.lat, r.lng);
+  map.flyTo(p, Math.max(map.getZoom(), 15), { duration: .6 });
+  placePopup(p, r.name);
+}
+async function runSearch(enter) {
+  const q = $('q').value.trim();
+  if (q.length < 3) { hideResults(); return; }
+  const p = parseLatLng(q);
+  if (p) { showResults([{ name: 'Coordinates', sub: `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`, lat: p.lat, lng: p.lng }]); if (enter) pickResult(0); return; }
+  if (/goo\.gl|maps\.app/i.test(q)) { msg('Short Google Maps links can’t be opened from here. Open the link, then paste the full URL from the address bar, or right-click the pin in Google Maps and copy the coordinates.'); return; }
+  msg('Searching…');
+  if (sCtl) sCtl.abort(); sCtl = new AbortController(); const sig = sCtl.signal;
+  const c = map.getCenter();
+  try {
+    const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}`, { signal: sig });
+    if (!r.ok) throw new Error('photon ' + r.status);
+    const j = await r.json();
+    const items = (j.features || []).map(f => {
+      const pr = f.properties || {}, [lng, lat] = f.geometry.coordinates;
+      const sub = [pr.street, pr.district || pr.locality, pr.city || pr.county, pr.state].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i && v !== pr.name).join(', ');
+      return { name: pr.name || pr.street || 'Unnamed place', sub, lat, lng };
+    });
+    if (!items.length) throw new Error('none');
+    showResults(items); if (enter) pickResult(0);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=7&q=${encodeURIComponent(q)}`, { signal: sig });
+      const j = await r.json();
+      const items = (j || []).map(x => { const parts = String(x.display_name).split(', '); return { name: parts[0], sub: parts.slice(1, 4).join(', '), lat: +x.lat, lng: +x.lon }; });
+      if (!items.length) throw new Error('none');
+      showResults(items); if (enter) pickResult(0);
+    } catch (e2) {
+      if (e2.name === 'AbortError') return;
+      msg('No results. Try another spelling, add the city, or paste coordinates (lat, lng).');
+    }
+  }
+}
+$('q').addEventListener('input', () => { clearTimeout(sTimer); sTimer = setTimeout(() => runSearch(false), 450); });
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(sTimer); runSearch(true); } else if (e.key === 'Escape') hideResults(); });
+document.addEventListener('click', e => { if (!e.target.closest('.search')) hideResults(); });
+
+const searchPin = L.circleMarker([0, 0], { radius: 8, color: '#fff', weight: 3, fillColor: '#111827', fillOpacity: 1 });
+function placePopup(p, title) {
+  searchPin.setLatLng(p).addTo(map);
+  searchPin.bindPopup(`<div class="pop"><b>${esc(title)}</b><div class="mono">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</div>
+    <div class="pop-btns"><button data-add="unit">+ Add ambulance here</button><button data-add="hosp">+ Add hospital here</button><button data-add="hot">+ Add demand hotspot here</button></div></div>`).openPopup();
+}
+map.on('popupopen', e => {
+  const el = e.popup.getElement();
+  el.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => { addAt(b.dataset.add, e.popup.getLatLng()); map.closePopup(); map.removeLayer(searchPin); }));
+});
+map.on('popupclose', () => { if (map.hasLayer(searchPin)) setTimeout(() => { if (!searchPin.isPopupOpen()) map.removeLayer(searchPin); }, 50); });
+
+/* =========================================================
+   Adding / editing entities
+   ========================================================= */
+function addAt(kind, p, opts = {}) {
+  const s = st.settings;
+  if (kind === 'unit') {
+    const name = opts.name || nextName(st.units, 'A');
+    change(`Adding ${name}`, () => { st.units.push({ id: uid('u'), name, lat: p.lat, lng: p.lng, r: s.defR, active: true, pinned: false, color: nextColor() }); });
+  } else if (kind === 'hosp') {
+    const name = opts.name || `Hospital ${st.hospitals.length + 1}`;
+    change(`Adding ${name}`, () => { st.hospitals.push({ id: uid('h'), name, lat: p.lat, lng: p.lng }); });
+  } else if (kind === 'hot') {
+    const name = nextName(st.hotspots, 'D');
+    change(`Adding hotspot ${name}`, () => { st.hotspots.push({ id: uid('d'), name, lat: p.lat, lng: p.lng, w: 1, sigma: 1 }); st.settings.demand = 'hotspots'; });
+    syncControls(); $('secDemand').open = true;
+  }
+}
+function flyTo(p) { map.flyTo(p, Math.max(map.getZoom(), 14), { duration: .6 }); }
+
+function bindList(listId, getList, kind) {
+  const el = $(listId);
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]'); if (!b || b.tagName === 'INPUT') return;
+    const row = b.closest('[data-id]'), list = getList(), idx = list.findIndex(x => x.id === row.dataset.id), item = list[idx];
+    if (!item) return;
+    if (b.dataset.act === 'locate') flyTo([item.lat, item.lng]);
+    if (b.dataset.act === 'del') change(`Removing ${item.name}`, () => { list.splice(idx, 1); });
+    if (b.dataset.act === 'dup') {
+      const name = nextName(st.units, 'A');
+      change(`Duplicating ${item.name} as ${name}`, () => { st.units.splice(idx + 1, 0, { ...item, id: uid('u'), name, lat: item.lat + 0.004, color: nextColor(), pinned: false }); });
+    }
+  });
+  el.addEventListener('change', e => {
+    const t = e.target, act = t.dataset.act; if (!act) return;
+    const row = t.closest('[data-id]'), list = getList(), item = list.find(x => x.id === row.dataset.id); if (!item) return;
+    if (act === 'name') { const v = t.value.trim().slice(0, 60) || item.name; change(`Renaming ${item.name} to ${v}`, () => { item.name = v; }); }
+    if (act === 'radius') { const v = clamp(parseFloat(t.value) || st.settings.defR, 0.5, 25); change(`Setting ${item.name} radius to ${v} km`, () => { item.r = v; }); }
+    if (act === 'active') change(`${t.checked ? 'Activating' : 'Deactivating'} ${item.name}`, () => { item.active = t.checked; });
+    if (act === 'pin') change(`${t.checked ? 'Pinning' : 'Unpinning'} ${item.name}`, () => { item.pinned = t.checked; });
+    if (act === 'w') { const v = clamp(parseFloat(t.value) || 1, 0.1, 20); change(`Setting ${item.name} weight to ${v}`, () => { item.w = v; }); }
+    if (act === 'sigma') { const v = clamp(parseFloat(t.value) || 1, 0.2, 10); change(`Setting ${item.name} spread to ${v} km`, () => { item.sigma = v; }); }
+    if (act === 'coord') {
+      const p = parseLatLng(t.value);
+      if (!p) { showToast('Could not read those coordinates. Use “lat, lng” or a full Google Maps URL.'); t.value = `${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}`; return; }
+      change(`Moving ${item.name} to entered coordinates`, () => { item.lat = p.lat; item.lng = p.lng; });
+      flyTo(p);
+    }
+  });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input.coord,input.name')) e.target.blur(); });
+}
+bindList('unitList', () => st.units, 'unit');
+bindList('hospList', () => st.hospitals, 'hosp');
+bindList('hotList', () => st.hotspots, 'hot');
+
+$('uBulk').addEventListener('change', e => {
+  const v = e.target.value; e.target.value = ''; if (!v) return;
+  const s = st.settings;
+  if (v === 'activate') change('Activating all ambulances', () => st.units.forEach(u => { u.active = true; }));
+  if (v === 'pin') change('Pinning all ambulances', () => st.units.forEach(u => { u.pinned = true; }));
+  if (v === 'unpin') change('Unpinning all ambulances', () => st.units.forEach(u => { u.pinned = false; }));
+  if (v === 'radius') change(`Setting all radii to ${s.defR} km`, () => st.units.forEach(u => { u.r = s.defR; }));
+  if (v === 'rename') change('Renumbering ambulances', () => st.units.forEach((u, i) => { u.name = 'A' + (i + 1); }));
+  if (v === 'clear' && st.units.length && confirm(`Remove all ${st.units.length} ambulances? You can undo this.`)) change('Removing all ambulances', () => { st.units = []; });
+});
+
+/* map click-to-place */
+let mode = 'pan';
+const MODE_TXT = { unit: 'Click the map to place an ambulance · Esc to stop', hosp: 'Click the map to place a hospital · Esc to stop', hot: 'Click the map to place a demand hotspot · Esc to stop' };
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.tools [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  map.getContainer().classList.toggle('adding', m !== 'pan');
+  const h = $('modeHint'); h.textContent = MODE_TXT[m] || ''; h.style.display = m === 'pan' ? 'none' : 'block';
+}
+const Tools = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const d = L.DomUtil.create('div', 'tools');
+    d.innerHTML = '<button data-mode="pan" class="on">✋ Move map</button><button data-mode="unit">+ Ambulance</button><button data-mode="hosp">+ Hospital</button><button data-mode="hot">+ Hotspot</button><button data-tool="geo">◎ My location</button><button data-tool="fit">⤢ Fit zone</button>';
+    L.DomEvent.disableClickPropagation(d);
+    d.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.mode) setMode(b.dataset.mode);
+      if (b.dataset.tool === 'fit') fitAll();
+      if (b.dataset.tool === 'geo') {
+        if (!navigator.geolocation) { showToast('This browser does not share location.'); return; }
+        navigator.geolocation.getCurrentPosition(pos => { const p = L.latLng(pos.coords.latitude, pos.coords.longitude); flyTo(p); placePopup(p, 'Your location'); },
+          err => showToast('Location unavailable: ' + esc(err.message || 'permission denied')), { enableHighAccuracy: true, timeout: 10000 });
+      }
+    });
+    return d;
+  }
+});
+map.addControl(new Tools());
+map.on('click', e => { if (mode !== 'pan') addAt(mode, e.latlng); });
+$('uAddMap').addEventListener('click', () => setMode('unit'));
+$('hAddMap').addEventListener('click', () => setMode('hosp'));
+$('hotAddMap').addEventListener('click', () => setMode('hot'));
+document.addEventListener('keydown', e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if (e.key === 'Escape') setMode('pan');
+  if (typing) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+});
+function fitAll() {
+  const R = st.settings.zoneR * 1000;
+  let b = null;
+  st.hospitals.forEach(h => { const cb = L.latLng(h.lat, h.lng).toBounds(R * 2); b = b ? b.extend(cb) : cb; });
+  st.units.forEach(u => b.extend([u.lat, u.lng]));
+  map.fitBounds(b, { padding: [20, 20] });
+}
+
+/* =========================================================
+   Optimizer, best spot, fleet sizing
+   ========================================================= */
+const OBJ = {
+  balanced: { label: 'balanced', f: e => e.coverage - (isFinite(e.avgAll) ? e.avgAll : 99) },
+  coverage: { label: 'max coverage', f: e => e.coverage - 0.01 * (isFinite(e.avgAll) ? e.avgAll : 99) },
+  response: { label: 'min response', f: e => -(isFinite(e.avgAll) ? e.avgAll : 99) + 0.001 * e.coverage }
+};
+function bandCandidates(spacing, cap) {
+  const s = st.settings, out = [];
+  for (let x = ZB.x0; x < ZB.x1; x += spacing) for (let y = ZB.y0; y < ZB.y1; y += spacing) {
+    const d = nearestHosp(x, y)[0]; if (d >= s.bandMin && d <= s.bandMax) out.push([x, y]);
+  }
+  if (out.length <= cap) return out;
+  const k = out.length / cap; return Array.from({ length: cap }, (_, i) => out[Math.floor(i * k)]);
+}
+function randBand() {
+  const s = st.settings, h = HXY[Math.floor(rnd() * HXY.length)], t = rnd() * 2 * Math.PI, r = s.bandMin + rnd() * (s.bandMax - s.bandMin);
+  return [h[0] + r * Math.sin(t), h[1] + r * Math.cos(t)];
+}
+function withBusy(btn, txt, fn) { const o = btn.textContent; btn.disabled = true; btn.textContent = txt; setTimeout(() => { try { fn(); } finally { btn.disabled = false; btn.textContent = o; } }, 30); }
+
+$('optBtn').addEventListener('click', () => {
+  const mov = [], fix = [];
+  st.units.forEach((u, i) => { if (!u.active) return; if (u.pinned) fix.push({ x: US[i].x, y: US[i].y, r: u.r }); else mov.push(i); });
+  if (!mov.length) { showToast('No active, unpinned ambulances to move.'); return; }
+  withBusy($('optBtn'), 'Optimizing…', () => {
+    const radii = mov.map(i => st.units[i].r), of = OBJ[st.settings.obj].f;
+    const score = P => of(evalCore(fix.concat(P.map((p, k) => ({ x: p[0], y: p[1], r: radii[k] }))), DC, false));
+    const t0 = performance.now(), BUDGET = 2500;
+    let best = mov.map(i => projectToBand(US[i].x, US[i].y)), bs = score(best), first = true;
+    while (first || performance.now() - t0 < BUDGET) {
+      let P = first ? best.map(p => p.slice()) : mov.map(randBand), sc = first ? bs : score(P), stp = 1.5; first = false;
+      while (stp > 0.05 && performance.now() - t0 < BUDGET * 1.6) {
+        let imp = false;
+        for (let k = 0; k < P.length; k++) for (const [dx, dy] of [[stp, 0], [-stp, 0], [0, stp], [0, -stp], [stp, stp], [-stp, -stp], [stp, -stp], [-stp, stp]]) {
+          const Q = P.slice(); Q[k] = projectToBand(P[k][0] + dx, P[k][1] + dy);
+          const v = score(Q); if (v > sc + 1e-9) { P = Q; sc = v; imp = true; }
+        }
+        if (!imp) stp /= 2;
+      }
+      if (sc > bs) { bs = sc; best = P; }
+    }
+    change(`Auto-optimize (${OBJ[st.settings.obj].label}, ${mov.length} unit${mov.length > 1 ? 's' : ''})`, () => {
+      best.forEach((p, k) => { const q = ll(p[0], p[1]), u = st.units[mov[k]]; u.lat = q.lat; u.lng = q.lng; });
+    });
+  });
+});
+
+$('uAddBest').addEventListener('click', () => withBusy($('uAddBest'), 'Finding…', () => {
+  const s = st.settings, base = activeU().map(a => ({ x: a.x, y: a.y, r: a.r })), of = OBJ[s.obj].f;
+  const cands = bandCandidates(0.4, 900); if (!cands.length) { showToast('The deployment band has no room. Check the band settings.'); return; }
+  let bk = -1, bv = -Infinity;
+  cands.forEach((c, k) => { const v = of(evalCore(base.concat([{ x: c[0], y: c[1], r: s.defR }]), DC, false)); if (v > bv) { bv = v; bk = k; } });
+  const p = ll(cands[bk][0], cands[bk][1]);
+  addAt('unit', p);
+}));
+
+let fsRows = [];
+$('fsBtn').addEventListener('click', () => withBusy($('fsBtn'), 'Calculating…', () => {
+  const s = st.settings, maxN = clamp(parseInt($('fsMax').value) || 12, 1, 40), target = clamp(parseFloat($('fsTarget').value) || 80, 1, 100);
+  const d = DC, R = s.defR, cands = bandCandidates(0.5, 700);
+  if (!cands.length) { $('fsOut').innerHTML = '<p class="note">The deployment band has no room. Check the band settings.</p>'; return; }
+  const cap = s.zoneR * 2, best = new Float64Array(d.n).fill(cap), covd = new Uint8Array(d.n), chosen = [];
+  fsRows = [];
+  for (let n = 1; n <= maxN; n++) {
+    let bk = -1, bg = -Infinity;
+    for (let k = 0; k < cands.length; k++) {
+      const cx = cands[k][0], cy = cands[k][1]; let gain = 0, red = 0;
+      for (let i = 0; i < d.n; i++) {
+        const dd = Math.hypot(d.x[i] - cx, d.y[i] - cy), w = d.w[i];
+        if (!covd[i] && dd <= R) gain += w;
+        if (dd < best[i]) red += (best[i] - dd) * w;
+      }
+      const g = gain * 1000 + red; if (g > bg) { bg = g; bk = k; }
+    }
+    const [cx, cy] = cands[bk]; chosen.push([cx, cy]);
+    for (let i = 0; i < d.n; i++) { const dd = Math.hypot(d.x[i] - cx, d.y[i] - cy); if (dd <= R) covd[i] = 1; if (dd < best[i]) best[i] = dd; }
+    const e = evalCore(chosen.map(p => ({ x: p[0], y: p[1], r: R })), d, false);
+    fsRows.push({ n, cov: e.coverage, resp: e.avgResp, all: e.avgAll, pts: chosen.map(p => { const q = ll(p[0], p[1]); return [q.lat, q.lng]; }) });
+    if (e.coverage >= 99.9) break;
+  }
+  const hit = fsRows.find(r => r.cov >= target);
+  $('fsOut').innerHTML = `<table class="fs"><thead><tr><th>Units</th><th>Coverage</th><th>Avg resp.</th><th>Zone-wide</th><th></th></tr></thead><tbody>` +
+    fsRows.map(r => `<tr class="${hit && r.n === hit.n ? 'hit' : ''}"><td>${r.n}</td><td>${r.cov.toFixed(1)}%</td><td>${fmt(r.resp)} min</td><td>${fmt(r.all)} min</td><td><button class="ico" data-fs="${r.n}">Use</button></td></tr>`).join('') +
+    `</tbody></table><p class="note">${hit ? `<b>${hit.n} ambulance${hit.n > 1 ? 's' : ''}</b> reach the ${target}% target` : `The ${target}% target is not reached with ${maxN} units`} at a ${R} km radius, placed inside the ${s.bandMin}–${s.bandMax} km band. “Use” replaces the current ambulances with that layout (undo is available).</p>`;
+}));
+$('fsOut').addEventListener('click', e => {
+  const b = e.target.closest('[data-fs]'); if (!b) return;
+  const row = fsRows.find(r => r.n === +b.dataset.fs); if (!row) return;
+  change(`Applying the ${row.n}-unit fleet sizing layout`, () => {
+    st.units = row.pts.map((p, k) => ({ id: uid('u'), name: 'A' + (k + 1), lat: p[0], lng: p[1], r: st.settings.defR, active: true, pinned: false, color: k < PAL.length ? PAL[k] : `hsl(${Math.round(k * 137.508) % 360} 65% 45%)` }));
+  });
+});
+
+/* =========================================================
+   Demand inputs
+   ========================================================= */
+function parseIncidents(text) {
+  const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const split = l => l.split(/[,;\t]/).map(v => v.trim().replace(/^"|"$/g, ''));
+  const head = split(lines[0]).map(v => v.toLowerCase());
+  let li = head.findIndex(h => /^(lat|latitude|pickup_lat|y)$/.test(h)), gi = head.findIndex(h => /^(lng|lon|long|longitude|pickup_lng|pickup_lon|x)$/.test(h)), start = 1;
+  if (li < 0 || gi < 0) {
+    const firstNums = split(lines[0]).map((v, i) => (v !== '' && isFinite(+v)) ? i : -1).filter(i => i >= 0);
+    if (firstNums.length >= 2) { start = 0; li = firstNums[0]; gi = firstNums[1]; }
+    else { const r2 = split(lines[1] || '').map((v, i) => (v !== '' && isFinite(+v)) ? i : -1).filter(i => i >= 0); if (r2.length < 2) return []; li = r2[0]; gi = r2[1]; }
+  }
+  const out = [];
+  for (let k = start; k < lines.length; k++) {
+    const r = split(lines[k]), a = parseFloat(r[li]), b = parseFloat(r[gi]);
+    if (isFinite(a) && isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180) out.push([a, b]);
+  }
+  return out;
+}
+function importIncidents(text, src) {
+  const pts = parseIncidents(text);
+  if (!pts.length) { showToast('No rows with latitude and longitude were found.'); return; }
+  change(`Importing ${pts.length.toLocaleString()} calls from ${src}`, () => { st.incidents = pts; st.settings.demand = 'incidents'; });
+  syncControls();
+}
+$('incFile').addEventListener('change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => importIncidents(t, f.name)); e.target.value = ''; });
+$('incImport').addEventListener('click', () => importIncidents($('incText').value, 'pasted rows'));
+$('incClear').addEventListener('click', () => { if (st.incidents.length) change('Clearing imported calls', () => { st.incidents = []; }); });
+
+/* =========================================================
+   Settings controls
+   ========================================================= */
+function syncControls() {
+  const s = st.settings;
+  $('speedR').value = s.speed; $('speedN').value = s.speed; $('circR').value = s.circ; $('circN').value = s.circ;
+  $('bgR').value = s.bg; $('bgN').value = s.bg;
+  $('zoneR').value = s.zoneR; $('defR').value = s.defR; $('bandMin').value = s.bandMin; $('bandMax').value = s.bandMax;
+  $('grid').value = String(s.grid); $('lock').checked = s.lock; $('obj').value = s.obj; $('demand').value = s.demand;
+  $('basemap').value = view.basemap; $('heat').value = view.heat; $('rings').checked = view.rings; $('incDots').checked = view.dots;
+}
+function bindPair(rId, nId, key, label, heavy) {
+  const R = $(rId), N = $(nId);
+  const apply = (v, src) => {
+    if (!isFinite(v)) return;
+    v = clamp(v, +N.min, +N.max); st.settings[key] = v;
+    if (src !== R) R.value = v; if (src !== N) N.value = v;
+    heavy ? schedule({ rebuild: true }) : schedule();
+  };
+  R.addEventListener('input', () => { beginChange(''); apply(+R.value, R); });
+  R.addEventListener('change', () => { flushSchedule(); if (heavy) rebuildAll(); endChange(label(st.settings[key])); });
+  N.addEventListener('change', () => { beginChange(''); apply(+N.value, N); flushSchedule(); if (heavy) rebuildAll(); endChange(label(st.settings[key])); });
+}
+bindPair('speedR', 'speedN', 'speed', v => `Setting traffic speed to ${v} km/h`);
+bindPair('circR', 'circN', 'circ', v => `Setting circuity to ${(+v).toFixed(2)}×`);
+bindPair('bgR', 'bgN', 'bg', v => `Setting background demand to ${v}`, true);
+
+function bindNum(id, key, lo, hi, label) {
+  $(id).addEventListener('change', e => {
+    let v = parseFloat(e.target.value); const s = st.settings;
+    if (!isFinite(v)) { e.target.value = s[key]; return; }
+    v = clamp(v, lo, hi);
+    const next = { ...s, [key]: v };
+    if (next.bandMin >= next.bandMax || next.bandMax > next.zoneR) {
+      showToast(`Need band min &lt; band max ≤ zone radius (now ${next.bandMin} / ${next.bandMax} / ${next.zoneR} km).`); e.target.value = s[key]; return;
+    }
+    change(label(v), () => { s[key] = v; });
+  });
+}
+bindNum('zoneR', 'zoneR', 1, 50, v => `Setting target zone to ${v} km`);
+bindNum('bandMin', 'bandMin', 0, 49, v => `Setting band minimum to ${v} km`);
+bindNum('bandMax', 'bandMax', 0.5, 50, v => `Setting band maximum to ${v} km`);
+bindNum('defR', 'defR', 0.5, 25, v => `Setting default radius to ${v} km`);
+$('grid').addEventListener('change', e => change('Changing calculation grid', () => { st.settings.grid = +e.target.value; }));
+$('obj').addEventListener('change', e => { st.settings.obj = e.target.value; save(); });
+$('demand').addEventListener('change', e => change(`Switching demand to ${e.target.selectedOptions[0].text.toLowerCase()}`, () => { st.settings.demand = e.target.value; }));
+$('lock').addEventListener('change', e => {
+  const on = e.target.checked;
+  change(on ? 'Snapping ambulances into the band' : 'Unlocking the band', () => {
+    st.settings.lock = on;
+    if (on) st.units.forEach((u, i) => { const [x, y] = projectToBand(US[i].x, US[i].y), q = ll(x, y); u.lat = q.lat; u.lng = q.lng; });
+  });
+});
+$('basemap').addEventListener('change', e => { view.basemap = e.target.value; setBasemap(); save(); });
+$('heat').addEventListener('change', e => { view.heat = e.target.value; renderLegend(); drawHeat(); save(); });
+$('rings').addEventListener('change', e => { view.rings = e.target.checked; renderZone(); renderLegend(); save(); });
+$('incDots').addEventListener('change', e => { view.dots = e.target.checked; renderIncidents(); renderLegend(); save(); });
+$('scName').addEventListener('change', e => { const v = e.target.value.trim().slice(0, 80) || 'Untitled scenario'; change('Renaming scenario', () => { st.name = v; }); });
+$('undoBtn').addEventListener('click', undo);
+$('redoBtn').addEventListener('click', redo);
+
+/* scenario files */
+function download(name, text, type) {
+  const blob = new Blob([text], { type }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+}
+const slug = () => (st.name || 'scenario').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'scenario';
+$('saveBtn').addEventListener('click', () => download(slug() + '.json', JSON.stringify({ version: 2, ...st, view }, null, 1), 'application/json'));
+$('loadBtn').addEventListener('click', () => $('loadFile').click());
+$('loadFile').addEventListener('change', e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  f.text().then(t => {
+    let o; try { o = JSON.parse(t); } catch (err) { showToast('That file is not a valid scenario (.json).'); return; }
+    const s = sanitize(o); if (!s) { showToast('That file has no hospitals, so it cannot be loaded.'); return; }
+    change(`Loading scenario “${s.name}”`, () => { Object.assign(st, s); });
+    if (o.view) { view = { ...DEF_VIEW, ...o.view }; setBasemap(); }
+    syncControls(); rebuildAll(); fitAll();
+  });
+});
+$('csvBtn').addEventListener('click', () => {
+  const q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
+  const rows = [['Type', 'Name', 'Latitude', 'Longitude', 'Nearest hospital', 'Distance to hospital (km)', 'Radius (km)', 'Active', 'Pinned', 'In band', 'Google Maps']];
+  st.hospitals.forEach((h, k) => rows.push(['Hospital', h.name, h.lat.toFixed(6), h.lng.toFixed(6), 'H' + (k + 1), '', '', '', '', '', `https://www.google.com/maps?q=${h.lat.toFixed(6)},${h.lng.toFixed(6)}`]));
+  st.units.forEach((u, i) => rows.push(['Ambulance', u.name, u.lat.toFixed(6), u.lng.toFixed(6), st.hospitals[US[i].hi].name, US[i].d.toFixed(2), u.r, u.active ? 'Yes' : 'No', u.pinned ? 'Yes' : 'No', US[i].inBand ? 'Yes' : 'No', `https://www.google.com/maps?q=${u.lat.toFixed(6)},${u.lng.toFixed(6)}`]));
+  rows.push([]);
+  const s = st.settings;
+  [['Speed (km/h)', s.speed], ['Circuity factor', s.circ], ['Target zone (km)', s.zoneR], ['Deployment band (km)', `${s.bandMin}-${s.bandMax}`], ['Demand model', s.demand],
+   ['Coverage (%)', fmt(metrics.coverage)], ['Avg response (min)', fmt(metrics.avgResp)], ['Avg hospital reach (min)', fmt(metrics.avgReach)],
+   ['Avg full-cycle TAT (min)', fmt(metrics.avgCycle)], ['P90 response (min)', fmt(metrics.p90)], ['Zone-wide response (min)', fmt(metrics.avgAll)]].forEach(r => rows.push(r));
+  download(slug() + '-positions.csv', rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv');
+});
+$('resetBtn').addEventListener('click', () => {
+  if (!confirm('Reset to the default PB Health layout with 4 ambulances? You can undo this.')) return;
+  change('Reset to default layout', () => { const d = defaultState(); Object.assign(st, d); });
+  syncControls(); rebuildAll(); fitAll();
+});
+
+/* theme */
+const root = document.documentElement;
+function setTheme(t) { root.dataset.theme = t; $('themeBtn').textContent = t === 'dark' ? 'Light' : 'Dark'; view.theme = t; setBasemap(); }
+$('themeBtn').addEventListener('click', () => { setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'); save(); });
+
+/* =========================================================
+   Init
+   ========================================================= */
+load();
+setTheme(view.theme || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+syncControls();
+fitAll();          // give the map a view first so markers exist in the DOM
+rebuildAll();
+updateUndo();
+window.addEventListener('resize', () => map.invalidateSize());
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
